@@ -4,17 +4,77 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title></title>
+  <title>HLS Player</title>
   <link href="style.css" rel="stylesheet">
-  <script src="https://vjs.zencdn.net/8.23.4/video.min.js">
-  </script>
+
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.23.4/video-js.min.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.23.4/video.min.js"></script>
 </head>
 
 <body>
-  <h1>Teste do Servidor HLS</h1>
-  <video id="player" class="video-js vjs-default-skin" controls width="720" height="480">
-    <source src="http://localhost:8080/hls/master.m3u8" type="application/x-mpegURL">
-  </video>
+  <div class="video-player">
+    <video id="my-player" class="video-js" controls preload="auto" width="1920" height="1080">
+      <source src="http://localhost:8080/hls/master.m3u8" type="application/x-mpegURL">
+    </video>
+  </div>
 </body>
+
+<script>
+  const video = videojs('my-player', {
+    html5: {
+      vhs: {
+        enableLowInitialPlaylist: true
+
+      }
+    }
+  }, function () {
+    console.log('Video.js player is ready');
+
+    // Get tech and VHS handler
+    const tech = this.tech({IWillNotUseThisInPlugins: true});
+
+    if (tech && tech.vhs) {
+      console.log('VHS found:', tech.vhs);
+
+      // Monitor playlist selections
+      tech.vhs.on('loadedplaylist', function () {
+        console.log('Playlist loaded:', tech.vhs.playlists.media());
+      });
+
+      // Monitoring bandwidth and quality levels every 5 seconds
+      setInterval(() => {
+        if (tech.vhs.systemBandwidth) {
+          console.log('=== ABR Status ===');
+          console.log('System bandwidth:', tech.vhs.systemBandwidth, 'bps');
+          console.log('Bandwidth estimate:', tech.vhs.bandwidth, 'bps');
+        }
+
+        const currentPlaylist = tech.vhs.playlists.media();
+        if (currentPlaylist) {
+          console.log('Current quality:', currentPlaylist.attributes.BANDWIDTH, 'bps', currentPlaylist.attributes.RESOLUTION);
+        }
+
+        // Log all available playlists
+        if (tech.vhs.playlists.main && tech.vhs.playlists.main.playlists) {
+          console.log('Available qualities:', tech.vhs.playlists.main.playlists.length);
+          tech.vhs.playlists.main.playlists.forEach((pl, idx) => {
+            console.log(`  [${idx}] ${pl.attributes.BANDWIDTH} bps - ${pl.attributes.RESOLUTION.width}x${pl.attributes.RESOLUTION.height}`);
+          });
+        }
+      }, 5000);
+    } else {
+      console.error('VHS not found on tech!');
+    }
+  });
+
+  // Monitor quality level changes
+  video.qualityLevels().on('change', function () {
+    console.log('Quality changed to:', video.qualityLevels()[video.qualityLevels().selectedIndex]);
+  });
+
+  video.on("error", function (e) {
+    console.error("Error occurred:", e);
+  });
+</script>
 
 </html>
