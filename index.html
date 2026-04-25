@@ -15,7 +15,7 @@
 <body>
   <div class="video-player">
     <video id="my-player" class="video-js" controls preload="auto" width="1920" height="1080">
-      <source src="http://localhost:8080/hls/master.m3u8" type="application/x-mpegURL">
+      <source src="http://localhost:80/hls/master.m3u8" type="application/x-mpegURL">
     </video>
   </div>
 
@@ -33,6 +33,23 @@
       <div class="chart-card">
         <h3>Buffer (seconds ahead)</h3>
         <canvas id="chart-buffer"></canvas>
+      </div>
+    </div>
+
+    <h2 class="dashboard-title" style="margin-top: 40px">Cache Metrics</h2>
+    <div class="charts-grid" style="grid-template-columns: 300px 1fr">
+      <div class="chart-card cache-stats">
+        <h3>Hit Rate</h3>
+        <canvas id="chart-cache"></canvas>
+        <div class="cache-numbers">
+          <span class="cache-hit">HIT: <strong id="hit-count">0</strong></span>
+          <span class="cache-miss">MISS: <strong id="miss-count">0</strong></span>
+          <span class="cache-rate">Rate: <strong id="hit-rate">0%</strong></span>
+        </div>
+      </div>
+      <div class="chart-card">
+        <h3>Requests over time (HIT / MISS)</h3>
+        <canvas id="chart-cache-timeline"></canvas>
       </div>
     </div>
   </div>
@@ -101,6 +118,136 @@
   });
 
   // ---------------------------------------------------------------------------
+  // Cache hit rate tracking
+  // ---------------------------------------------------------------------------
+  const cacheStats = {hits: 0, misses: 0};
+
+  // Doughnut chart showing overall HIT vs MISS ratio.
+  const cacheDonutChart = new Chart(
+    document.getElementById('chart-cache').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: ['HIT', 'MISS'],
+      datasets: [{
+        data: [0, 0],
+        backgroundColor: ['#4a90e2', '#e50914'],
+        borderWidth: 0,
+      }]
+    },
+    options: {
+      animation: false,
+      plugins: {legend: {position: 'bottom', labels: {color: '#ccc'}}},
+    }
+  }
+  );
+
+  // Timeline showing cumulative HITs and MISSes over time.
+  const cacheTimelineChart = new Chart(
+    document.getElementById('chart-cache-timeline').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: metrics.timestamps,  // shares the same x-axis as ABR charts
+      datasets: [
+        {
+          label: 'HIT',
+          data: [],
+          borderColor: '#4a90e2',
+          backgroundColor: '#4a90e222',
+          borderWidth: 2,
+          tension: 0.3,
+          fill: true,
+        },
+        {
+          label: 'MISS',
+          data: [],
+          borderColor: '#e50914',
+          backgroundColor: '#e5091422',
+          borderWidth: 2,
+          tension: 0.3,
+          fill: true,
+        }
+      ]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      scales: {
+        x: {ticks: {maxTicksLimit: 8}},
+        y: {beginAtZero: true},
+      }
+    }
+  }
+  );
+
+  // Timeline buckets — counts per polling interval (reset each tick).
+  let intervalHits = 0;
+  let intervalMisses = 0;
+
+  // Called by recordMetrics to flush interval counts into the timeline chart.
+  function flushCacheTimeline() {
+    cacheTimelineChart.data.datasets[0].data.push(intervalHits);
+    cacheTimelineChart.data.datasets[1].data.push(intervalMisses);
+
+    if (cacheTimelineChart.data.datasets[0].data.length > MAX_POINTS) {
+      cacheTimelineChart.data.datasets[0].data.shift();
+      cacheTimelineChart.data.datasets[1].data.shift();
+    }
+
+    intervalHits = 0;
+    intervalMisses = 0;
+    cacheTimelineChart.update();
+  }
+
+  // ---------------------------------------------------------------------------
+  // recordCacheHit — called for every .ts segment request intercepted.
+  // Updates cacheStats, the doughnut chart, and the counters in the DOM.
+  //
+  // TODO(human): implement this function.
+  // Parameters:
+  //   isHit — true if X-Cache-Status was "HIT", false if "MISS"
+  // ---------------------------------------------------------------------------
+  function recordCacheHit(isHit) {
+    if (isHit) {
+      cacheStats.hits++;
+      intervalHits++;
+    } else {
+      cacheStats.misses++;
+      intervalMisses++;
+    }
+
+    const total = cacheStats.hits + cacheStats.misses;
+    const rate = total > 0 ? (cacheStats.hits / total * 100).toFixed(1) : 0;
+    document.getElementById('hit-count').textContent = cacheStats.hits;
+    document.getElementById('miss-count').textContent = cacheStats.misses;
+    document.getElementById('hit-rate').textContent = rate + '%';
+
+    cacheDonutChart.data.datasets[0].data = [cacheStats.hits, cacheStats.misses];
+    cacheDonutChart.update();
+  }
+
+  // ---------------------------------------------------------------------------
+  // XHR interceptor — wraps the native XMLHttpRequest to observe every
+  // request VHS makes internally, without modifying Video.js itself.
+  // ---------------------------------------------------------------------------
+  const _open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url, ...args) {
+    this._requestUrl = url;
+    return _open.call(this, method, url, ...args);
+  };
+
+  const _send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function (...args) {
+    this.addEventListener('load', () => {
+      // Only track .ts segment requests — ignore .m3u8, images, scripts, etc.
+      if (this._requestUrl && this._requestUrl.endsWith('.ts')) {
+        const status = this.getResponseHeader('X-Cache-Status');
+        if (status) recordCacheHit(status === 'HIT');
+      }
+    });
+    return _send.call(this, ...args);
+  };
+
+  // ---------------------------------------------------------------------------
   // recordMetrics — called on every polling interval with the latest values.
   // Pushes a new data point to each chart and trims old data when MAX_POINTS
   // is exceeded.
@@ -165,6 +312,7 @@
 
         // --- Feed the dashboard -------------------------------------------
         recordMetrics(timestamp, qualityHeight, bandwidthMbps, bufferSec);
+        flushCacheTimeline();
       }, 1000);
 
     } else {

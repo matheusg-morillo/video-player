@@ -36,3 +36,16 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+
+.cache-numbers {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  font-family: sans-serif;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.cache-hit  { color: #4a90e2; }
+.cache-miss { color: #e50914; }
+.cache-rate { color: #f5a623; }
