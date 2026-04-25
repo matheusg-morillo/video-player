@@ -9,6 +9,7 @@
 
   <link href="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.23.4/video-js.min.css" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.23.4/video.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body>
@@ -17,63 +18,166 @@
       <source src="http://localhost:8080/hls/master.m3u8" type="application/x-mpegURL">
     </video>
   </div>
+
+  <div class="dashboard">
+    <h2 class="dashboard-title">ABR Metrics — Real-time</h2>
+    <div class="charts-grid">
+      <div class="chart-card">
+        <h3>Quality Level</h3>
+        <canvas id="chart-quality"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>Bandwidth (Mbps)</h3>
+        <canvas id="chart-bandwidth"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>Buffer (seconds ahead)</h3>
+        <canvas id="chart-buffer"></canvas>
+      </div>
+    </div>
+  </div>
 </body>
 
 <script>
-  const video = videojs('my-player', {
-    html5: {
-      vhs: {
-        enableLowInitialPlaylist: true
+  // ---------------------------------------------------------------------------
+  // Metrics store
+  // MAX_POINTS caps history to avoid unbounded memory growth.
+  // At a 5s polling interval, 60 points = last 5 minutes of data.
+  // ---------------------------------------------------------------------------
+  const MAX_POINTS = 60;
 
+  const metrics = {
+    timestamps: [],  // x-axis labels (HH:MM:SS strings)
+    quality: [],     // resolution height in px (360, 480, 720, 1080)
+    bandwidth: [],   // estimated bandwidth in Mbps
+    buffer: [],      // seconds of video buffered ahead of playhead
+  };
+
+  // ---------------------------------------------------------------------------
+  // Chart factory — creates a line chart with a single dataset.
+  // Each chart shares the same config shape; only labels and colors differ.
+  // ---------------------------------------------------------------------------
+  function createChart(canvasId, label, color, yConfig = {}) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    return new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: metrics.timestamps,
+        datasets: [{
+          label,
+          data: [],
+          borderColor: color,
+          backgroundColor: color + '22', // hex color + low-opacity fill
+          borderWidth: 2,
+          pointRadius: 3,
+          tension: 0.3,  // slight curve on the line (0 = sharp, 1 = very smooth)
+          fill: true,
+        }]
+      },
+      options: {
+        animation: false,  // skip animation on update for real-time feel
+        responsive: true,
+        plugins: {legend: {display: false}},
+        scales: {
+          x: {ticks: {maxTicksLimit: 8}},
+          y: {beginAtZero: true, ...yConfig},
+        }
       }
-    }
+    });
+  }
+
+  // Quality y-axis maps numeric height to a resolution label (360 → "360p").
+  const qualityChart = createChart('chart-quality', 'Quality', '#e50914', {
+    ticks: {callback: v => v ? v + 'p' : ''},
+    suggestedMax: 1080,
+  });
+
+  const bandwidthChart = createChart('chart-bandwidth', 'Bandwidth', '#f5a623', {
+    suggestedMax: 10,
+  });
+
+  const bufferChart = createChart('chart-buffer', 'Buffer', '#4a90e2', {
+    suggestedMax: 30,
+  });
+
+  // ---------------------------------------------------------------------------
+  // recordMetrics — called on every polling interval with the latest values.
+  // Pushes a new data point to each chart and trims old data when MAX_POINTS
+  // is exceeded.
+  // ---------------------------------------------------------------------------
+  function recordMetrics(timestamp, quality, bandwidth, buffer) {
+    metrics.timestamps.push(timestamp);
+    metrics.quality.push(quality);
+    metrics.bandwidth.push(bandwidth);
+    metrics.buffer.push(buffer);
+
+    Object.entries(metrics).forEach(([key, value]) => {
+      if (metrics[key].length > MAX_POINTS) {
+        metrics[key].shift();
+      }
+    })
+
+    qualityChart.data.datasets[0].data = metrics.quality;
+    bandwidthChart.data.datasets[0].data = metrics.bandwidth;
+    bufferChart.data.datasets[0].data = metrics.buffer;
+
+    qualityChart.update();
+    bandwidthChart.update();
+    bufferChart.update();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Video.js + VHS setup
+  // ---------------------------------------------------------------------------
+  const video = videojs('my-player', {
+    html5: {vhs: {enableLowInitialPlaylist: true}}
   }, function () {
     console.log('Video.js player is ready');
 
-    // Get tech and VHS handler
     const tech = this.tech({IWillNotUseThisInPlugins: true});
 
     if (tech && tech.vhs) {
-      console.log('VHS found:', tech.vhs);
-
-      // Monitor playlist selections
-      tech.vhs.on('loadedplaylist', function () {
-        console.log('Playlist loaded:', tech.vhs.playlists.media());
-      });
-
-      // Monitoring bandwidth and quality levels every 5 seconds
       setInterval(() => {
-        if (tech.vhs.systemBandwidth) {
-          console.log('=== ABR Status ===');
-          console.log('System bandwidth:', tech.vhs.systemBandwidth, 'bps');
-          console.log('Bandwidth estimate:', tech.vhs.bandwidth, 'bps');
-        }
+        // --- Collect raw values from VHS ----------------------------------
+        if (video.paused()) return;
+
+        const bandwidthMbps = tech.vhs.systemBandwidth
+          ? tech.vhs.systemBandwidth / 1_000_000
+          : 0;
+
+        // buffered().end(0) is the furthest point buffered; subtract
+        // currentTime to get how many seconds are buffered ahead.
+        const bufferSec = video.buffered().length > 0
+          ? Math.max(0, video.buffered().end(0) - video.currentTime())
+          : 0;
 
         const currentPlaylist = tech.vhs.playlists.media();
-        if (currentPlaylist) {
-          console.log('Current quality:', currentPlaylist.attributes.BANDWIDTH, 'bps', currentPlaylist.attributes.RESOLUTION);
-        }
+        const qualityHeight = currentPlaylist?.attributes?.RESOLUTION?.height ?? 0;
 
-        // Log all available playlists
-        if (tech.vhs.playlists.main && tech.vhs.playlists.main.playlists) {
-          console.log('Available qualities:', tech.vhs.playlists.main.playlists.length);
-          tech.vhs.playlists.main.playlists.forEach((pl, idx) => {
-            console.log(`  [${idx}] ${pl.attributes.BANDWIDTH} bps - ${pl.attributes.RESOLUTION.width}x${pl.attributes.RESOLUTION.height}`);
-          });
-        }
-      }, 5000);
+        // HH:MM:SS label for the x-axis
+        const timestamp = new Date().toLocaleTimeString();
+
+        // Log to console (keeps existing behavior)
+        console.log('=== ABR Status ===');
+        console.log('Bandwidth:', bandwidthMbps.toFixed(2), 'Mbps');
+        console.log('Buffer:', bufferSec.toFixed(1), 's');
+        console.log('Quality:', qualityHeight + 'p');
+
+        // --- Feed the dashboard -------------------------------------------
+        recordMetrics(timestamp, qualityHeight, bandwidthMbps, bufferSec);
+      }, 1000);
+
     } else {
       console.error('VHS not found on tech!');
     }
   });
 
-  // Monitor quality level changes
   video.qualityLevels().on('change', function () {
     console.log('Quality changed to:', video.qualityLevels()[video.qualityLevels().selectedIndex]);
   });
 
-  video.on("error", function (e) {
-    console.error("Error occurred:", e);
+  video.on('error', function (e) {
+    console.error('Error occurred:', e);
   });
 </script>
 

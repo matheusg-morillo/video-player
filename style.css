@@ -2,3 +2,37 @@
   width: 1920px;
   margin: 0 auto;
 }
+
+/* Dashboard */
+.dashboard {
+  max-width: 1920px;
+  margin: 32px auto;
+  padding: 0 24px;
+}
+
+.dashboard-title {
+  font-family: sans-serif;
+  color: #e50914;
+  margin-bottom: 20px;
+}
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+.chart-card {
+  background: #1a1a1a;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.chart-card h3 {
+  font-family: sans-serif;
+  color: #ccc;
+  font-size: 14px;
+  margin: 0 0 12px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
