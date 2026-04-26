@@ -15,7 +15,7 @@
 <body>
   <div class="video-player">
     <video id="my-player" class="video-js" controls preload="auto" width="1920" height="1080">
-      <source src="http://localhost:80/hls/master.m3u8" type="application/x-mpegURL">
+      <source src="https://d3nhb0u8y6tjxa.cloudfront.net/master.m3u8" type="application/x-mpegURL">
     </video>
   </div>
 
@@ -276,8 +276,27 @@
   // ---------------------------------------------------------------------------
   // Video.js + VHS setup
   // ---------------------------------------------------------------------------
+  // Paste the params from sign_url.py here each time you regenerate a signed URL.
+  const CF_PARAMS = {
+    Policy: "eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9kM25oYjB1OHk2dGp4YS5jbG91ZGZyb250Lm5ldC8qIiwiQ29uZGl0aW9uIjp7IkRhdGVMZXNzVGhhbiI6eyJBV1M6RXBvY2hUaW1lIjoxNzc3MTg3NDc5fX19XX0_",
+    Signature: "JL~Il1nvgFTHWxInQ~49b7VnLoL1qSVcG-LYDSPKYCCOTySMD7pDp0hS01MImCjCbhO4HIzK3z0nNpkgeDW31GYDu3ywcN0Ae7KDZW45h~2KTDQrDZ5skGWuZtGCp2U8WABNeziiy-eiv8bY8wPLBX1sox7nDygNrkgBKP7t92Rtc~YdIXdq0HV~DTzS-W9htJbDSG4l263oQ8pAD5lCJgHU~6XR054EFgCYcBpnm5WH-SZBCjnvYxiVbYLF9l8sgzajMI3vfVUUUcR3hrvp~kUc5B0CDwZ-ZC0jEDMtY6SnepYELfvNzu4DsAdpcQ5SbX2D8pP7jJdJBs-38ZA5Bg__",
+    "Key-Pair-Id": "KXL1LQZ98ZRNL",
+  };
+
+  // Must be set globally BEFORE the player initializes in Video.js 8.x.
+  videojs.Vhs.xhr.beforeRequest = function (options) {
+    const url = new URL(options.uri);
+    Object.entries(CF_PARAMS).forEach(([k, v]) => url.searchParams.set(k, v));
+    options.uri = url.toString();
+    return options;
+  };
+
   const video = videojs('my-player', {
-    html5: {vhs: {enableLowInitialPlaylist: true}}
+    html5: {
+      vhs: {
+        enableLowInitialPlaylist: true,
+      }
+    }
   }, function () {
     console.log('Video.js player is ready');
 
